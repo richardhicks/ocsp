@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 1.0.1
+.VERSION 2.0
 
 .GUID c035b367-4aae-41ab-9d9b-92902ed175b6
 
@@ -33,6 +33,11 @@
 
     Installs and configures an ADCS Online Responder service on the local server.
 
+.EXAMPLE
+    .\Install-OcspServer.ps1 -WhatIf
+
+    Previews all changes without applying them.
+
 .DESCRIPTION
     PowerShell script to install and configure an ADCS Online Responder service on a Windows Server. The script installs the Online Responder role service and configures the service to respond to certificate status requests. In addition, the script enables Windows auditing for certificate service events, auditing for the OCSP service itself, and configuring the Windows firewall to allow traffic to and from the Online Responder service.
 
@@ -49,9 +54,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.0.1
+    Version:        2.0
     Creation Date:  December 14, 2024
-    Last Updated:   January 26, 2026
+    Last Updated:   May 1, 2026
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -59,19 +64,31 @@
 
 #>
 
-[CmdletBinding()]
+#Requires -RunAsAdministrator
+
+[CmdletBinding(SupportsShouldProcess)]
 
 Param (
 
 )
 
-#Requires -RunAsAdministrator
+# Install OCSP role
+Write-Verbose 'Installing Online Responder role service...'
 
 Try {
 
-    # Install OCSP role and configure
-    Write-Verbose 'Installing Online Responder role service...'
-    [void](Install-WindowsFeature ADCS-Online-Cert -IncludeManagementTools -ErrorAction Stop)
+    If ($PSCmdlet.ShouldProcess('ADCS-Online-Cert', 'Install Windows feature')) {
+
+        $FeatureResult = Install-WindowsFeature ADCS-Online-Cert -IncludeManagementTools -ErrorAction Stop
+
+        If ($FeatureResult.RestartNeeded -ne 'No') {
+
+            Write-Warning 'A system restart is required to complete the installation. Restart the server and run this script again.'
+            Return
+
+        }
+
+    }
 
 }
 
@@ -87,7 +104,11 @@ Write-Verbose 'Configuring Online Responder service...'
 
 Try {
 
-    [void](Install-AdcsOnlineResponder -Force)
+    If ($PSCmdlet.ShouldProcess('Online Responder', 'Configure ADCS role service')) {
+
+        [void](Install-AdcsOnlineResponder -Force -ErrorAction Stop)
+
+    }
 
 }
 
@@ -100,25 +121,87 @@ Catch {
 
 # Enable Windows auditing
 Write-Verbose 'Enabling Windows auditing for certificate services and related events...'
-[void](Invoke-Command -ScriptBlock { auditpol.exe /set /subcategory:"Certification Services" /success:enable /failure:enable })
-[void](Invoke-Command -ScriptBlock { auditpol.exe /set /subcategory:"Registry" /success:enable /failure:enable })
-[void](Invoke-Command -ScriptBlock { auditpol.exe /set /subcategory:"Other System Events" /success:enable /failure:enable })
 
-# Enable OCSP service auditing
-Write-Verbose 'Enable OCSP service auditing...'
-[void](New-ItemProperty -Path HKLM:\SYSTEM\CurrentControlSet\Services\OcspSvc\Responder\ -Name AuditFilter -Type DWORD -Value 11 -Force)
+Try {
 
-# Enable firewall rules
+    If ($PSCmdlet.ShouldProcess('Certification Services, Registry, Other System Events', 'Enable audit policy')) {
+
+        auditpol.exe /set /subcategory:"Certification Services","Registry","Other System Events" /success:enable /failure:enable
+
+        If ($LASTEXITCODE -ne 0) {
+
+            Throw "auditpol.exe failed with exit code $LASTEXITCODE."
+
+        }
+
+    }
+
+}
+
+Catch {
+
+    Write-Warning $_.Exception.Message
+    Return
+
+}
+
+# Enable OCSP service auditing - AuditFilter 11 (0x0B): service start/stop (0x01), revocation config changes (0x02), signing certificate events (0x08)
+Write-Verbose 'Enabling OCSP service auditing...'
+
+Try {
+
+    If ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\OcspSvc\Responder\AuditFilter', 'Set registry value')) {
+
+        $Params = @{
+
+            Path        = 'HKLM:\SYSTEM\CurrentControlSet\Services\OcspSvc\Responder\'
+            Name        = 'AuditFilter'
+            Type        = 'DWORD'
+            Value       = 11
+            Force       = $true
+            ErrorAction = 'Stop'
+        }
+
+        [void](New-ItemProperty @Params)
+
+    }
+
+}
+
+Catch {
+
+    Write-Warning $_.Exception.Message
+    Return
+
+}
+
+# Enable firewall rules restricted to the Domain profile
 Write-Verbose 'Enabling firewall rules for Online Responder service...'
-[void](Set-NetFirewallRule -DisplayName "Online Responder Service (DCOM-In)" -Profile Any -Enabled True)
-[void](Set-NetFirewallRule -DisplayName "Online Responder Service (RPC-In)" -Profile Any -Enabled True)
-[void](Set-NetFirewallRule -DisplayName "Online Responder Service (TCP-Out)" -Profile Any -Enabled True)
+
+Try {
+
+    If ($PSCmdlet.ShouldProcess('Online Responder firewall rules', 'Enable and restrict to Domain profile')) {
+
+        Set-NetFirewallRule -Name 'Microsoft-Windows-CertificateServices-OcspSvc-RPC-TCP-In' -Profile Domain -Enabled True -ErrorAction Stop
+        Set-NetFirewallRule -Name 'Microsoft-Windows-OnlineRevocationServices-OcspSvc-DCOM-In' -Profile Domain -Enabled True -ErrorAction Stop
+        Set-NetFirewallRule -Name 'Microsoft-Windows-OnlineRevocationServices-OcspSvc-TCP-Out' -Profile Domain -Enabled True -ErrorAction Stop
+
+    }
+
+}
+
+Catch {
+
+    Write-Warning $_.Exception.Message
+    Return
+
+}
 
 # SIG # Begin signature block
 # MIIf2gYJKoZIhvcNAQcCoIIfyzCCH8cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAg6uUuU7An/BpG
-# kXoxYl2xvt6GKddQVe/cwf95WDQLwKCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5MfQjsMI5kxCw
+# TGIhfAeIibLGafuV9KSDtgkZZogzHKCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -265,24 +348,24 @@ Write-Verbose 'Enabling firewall rules for Online Responder service...'
 # YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
 # Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
 # oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
-# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg0PKs43d9alAXpOfPI6nHJuF5
-# nkQsW1IXT0cXSOgGlFswCwYHKoZIzj0CAQUABEcwRQIgHkqSV7Qf8ustp0GMG7Uz
-# CfJeTUD1az1/0IwPtuxl8MgCIQC2jHM9m+BrHlN56jvhoKihorbl2Hvc6mgLjrte
-# Silp/qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
+# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgfhDklnie0VmsCrOQ0IkphTi3
+# BRb1F6+t3Uia98Djr10wCwYHKoZIzj0CAQUABEcwRQIhANOYLs1KZCCZ0ZYMh0jP
+# 4qOg74t970YXnWD+CfrND3waAiBeOSPs+7k/lekUD1d6dnG3dxzpQkaxsCTCezoc
+# oYVVu6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
 # AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
 # VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
 # EAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMx
-# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjAxMjcwMDM3MDlaMC8GCSqG
-# SIb3DQEJBDEiBCBt1a/Vm8Zx6B08B9ysH6yoOSElolaE8nfCQqq5U+kt7zANBgkq
-# hkiG9w0BAQEFAASCAgC1db9BSoOHDieKJUPmXR30gAoS+v6Y7sayxmDFNlTU2+NI
-# FEuEJ/pUwvlF3qlHVhYN5JG0YyKVxdUiT08QXx0HKsSae1oJZfc+11vfbshHOqhI
-# CcZ7jNaJjI+8mpBbyVwSkJVZ7QBms4YN5LaC8/40w74ik0pg2dBMtWEyLK4w1Lio
-# H0aTasuPCi+J2HeaZ//mDHiQqJEEr8PQwy3Br500UtM2oK66oeVb+p55UDHlrwtj
-# C1YNyA5wZXCUKsaDJvUDaKYA/04hOx9Qm9LwaKUr7yfBGbFCfqy/8VcqTTDTjL7o
-# iDYFBhBMiqVPsq+bdfEUbIvkGCzQXofK1Fzye2XgCan98SR1hX8fFTGveZiGwPjq
-# HVtG/B3jVKFDlAQuKEQURcnyF2suZb5bDexy9L+qSbiKFr59o+0Rclh97CJdmerm
-# Uyz9qO+t0nll/i4S/JUZT+Vf6tTWLtnebdkYvOSzKw7uWktAXWpzp30Esnj9yuTA
-# 6+bANrjAUzDpY9O3eomygDqUQVna6uaA2Zf7etOhbTBaixDGVYjGvhGP8K0S9Nvp
-# zXqG38yljAJYBY6zfVJImW2zQDi95dUYYOmjOZtm83ToM8RTfXktTIo2mt+cdFf5
-# fkYlBjUkkvst6k/KM79HSoWza7G/EeyYStZTtocbGYmzHAFZYgoaFCRlQ6noNg==
+# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA1MDExNjQ1NDBaMC8GCSqG
+# SIb3DQEJBDEiBCDda2sT4/FDailnedezNvfSqdkfZdvpOYMfDlTQvDV5dTANBgkq
+# hkiG9w0BAQEFAASCAgAqC/YnZ5Ogh4pK7bGT4cNMJaCyFVaMT59OPeU+PpcoZAAw
+# TQA7DXvrsdKzSc5Q81eDMWEzeywyPKaZjPt1aW7yNuEPxvcsVZ0f138lTUOq6N0Y
+# u2P6JaUk2YS8FR/r0naNL6jvP3IrTYncLpRrBnTRF4yxV9wzFpfKknt1BHYri1se
+# rKs5KGCOAheb0rnzuX8Uk0YWrl+T1K/Q2s0cgG207MfsijRuvI4x+mjOFmJYiSrk
+# BvITMlWAvonTtokx4yKeMZb+eV82vY6F1G/5ep4N3bFbyFIzPiTvxIWnFGIAnPRU
+# Ev2exjZPdhnHJKghQpyGP77SsGBLsn73nnvSQnrSizY0GQu4U5JRUy9RKDYuV/Cl
+# gTlSNrzYzHRiT28xojCo0wF1o3eTaM2oyJm2SNEPDJQWxIwE814OuqbRGPcq2qgJ
+# 87CuzoBHS5M+HIA9/WHhq+HvmM3JXAjzy6aunrMWaZkB9ib12Lv8WO1L6WKeagVb
+# yPmaG92thQ52GaAfyZ8fElSQQmobUNeWbDsnky25XFfdh3wR7QadEeW+LjItc2Vk
+# yCPwhYZu8xRN+xDs4Y8LrESiVoTVuoxjYMVLt1gOwvR1vycfiNnOoa4qHdybQjSt
+# Jgpi95reR1EeQR8kXCMtJt0XW6UJlWHju2p6uUsuz4irCSG1YSsx3kgzJ5fWZQ==
 # SIG # End signature block
