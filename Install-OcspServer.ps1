@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 2.0.1
+.VERSION 2.1
 
 .GUID c035b367-4aae-41ab-9d9b-92902ed175b6
 
@@ -16,7 +16,7 @@
 
 .PROJECTURI https://github.com/richardhicks/ocsp
 
-.TAGS OCSP, ADCS, certificates, PKI, security, Windows, Microsoft, authentication
+.TAGS OCSP, ADCS, certificates, PKI, security, Windows, Microsoft, authentication, revocation
 
 #>
 
@@ -54,7 +54,7 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        2.0.1
+    Version:        2.1
     Creation Date:  December 14, 2024
     Last Updated:   May 1, 2026
     Author:         Richard Hicks
@@ -126,7 +126,7 @@ Try {
 
     If ($PSCmdlet.ShouldProcess('Certification Services, Registry, Other System Events', 'Enable audit policy')) {
 
-        [void](auditpol.exe /set /subcategory:"Certification Services","Registry","Other System Events" /success:enable /failure:enable)
+        [void](auditpol.exe /set /subcategory:"Certification Services", "Registry", "Other System Events" /success:enable /failure:enable)
 
         If ($LASTEXITCODE -ne 0) {
 
@@ -196,11 +196,27 @@ Catch {
     Return
 
 }
+
+# If not Server Core, open the OCSP management console
+$RegPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+$IsServerCore = (Get-ItemProperty -Path $regPath -Name 'InstallationType' -ErrorAction SilentlyContinue).InstallationType -eq 'Server Core'
+
+If (-not $isServerCore) {
+
+    Start-Process -FilePath 'mmc.exe' -ArgumentList 'ocsp.msc'
+
+}
+
+Else {
+
+    Write-Warning 'Server Core detected. Open the OCSP management console (ocsp.msc) on an administrative workstation with the Remote Server Administration Tools (RSAT) installed to complete the configuration.'
+
+}
 # SIG # Begin signature block
-# MIIf2gYJKoZIhvcNAQcCoIIfyzCCH8cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIf2QYJKoZIhvcNAQcCoIIfyjCCH8YCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1WdzMlWG3iw97
-# 7X6H4Gcod6KDjIgRYEIED74c5qUzUaCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCp0A2BA1zhy06D
+# 4IBHxACv5QIFe5/NQFGeViIwHJGoAKCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -342,29 +358,29 @@ Catch {
 # roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47Cdx
 # VRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/r
 # ptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL
-# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJcwggSTAgEBMHgwZDELMAkGA1UEBhMCVVMx
+# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJYwggSSAgEBMHgwZDELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTwwOgYDVQQDEzNEaWdpQ2VydCBHbG9i
 # YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
 # Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
 # oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
-# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgB8MA1/VidEzYkm8Fke70XFqd
-# I+V7LIYehZNsuOhPC1swCwYHKoZIzj0CAQUABEcwRQIhAMmEbWplS/VIfJbpyrcE
-# l4Z+1JZWQe52URJU/k+Vv8JHAiBZ3pOIFXo0QSCT4dCGssr/w6XB2PJO7WEk+GNx
-# mA9ge6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
-# AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
-# VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
-# EAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMx
-# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA1MDExODU0NDRaMC8GCSqG
-# SIb3DQEJBDEiBCDhk1TaiZr6Sqzk0EKHHQO2uGJ++hrEdfoOvOxVfF12FTANBgkq
-# hkiG9w0BAQEFAASCAgBH6y2TPqVDFut7BYxM0QZNNrlW8lQx/WtF2n6VvH2gfM+A
-# BwDm4hONcqiCA6GN54JmaJrE7XKhWwpiMA3J4KhlCPz/q0KO9LeYyk+LYGcq2vkt
-# TqtDPfzZuDdrnCjjSpYPIPVGnrxtRhJWoM7V7pSEnKJkxa/UyWm+hF/54kz3H4Y2
-# bHNFoeR7adCiJRT7NttnRJZDoqf59G4xGA4FczZ6lpdtuwU+Kqt32pMeuDYrXoKa
-# qkTynBtOffisRCC+RDF5IeOGGcODDWUeo88eHex03Swrjlgaz1rqlLXu2fZbSqqJ
-# 0X5lkkFtAV5L3gyo/dwNOELrES0WK7yncHW4pdKZ+/TKWSwKqmFBDDZ6qNd8/R3j
-# qe5/SKuEIJaDlOtQaxBY0jCaJIbXhrIjxqMwQ3y+x9EE/AecofZhFxngngAnzi28
-# 4TdrJjdFJa9Lv1IWUjbLOXmwjM59QIOS2zzBe4Zs1CmVJLhFSYutuTSV9AZvTyZR
-# BYy0FaWmF1rcGmgZYkTzAkoIRg9yyW67Iky18mDEDN49KZ5KkgQXozclpnwYWiRU
-# OS1jfKLxJkj+PerBsyq/zg7s/KZkyQFx+iw1SmcjcWWmLxXarUqFLDjwNSipJAuN
-# KPCgJYOw84/MedC6BRRBQvXIpCHWbzJs7qASDvBr3pK01Bpc+jQzNvua+/Ef9A==
+# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgL0jfszj/787iDjVGgmsR6YgH
+# Evtcy4zYNf6WURSvorEwCwYHKoZIzj0CAQUABEYwRAIgI2f8lAXKMv/YUQaB0rHf
+# omx4v47dcDoSjHDMy62PvnoCIDVfBHUxNlUCys/igEMUte6ROfwmzvJhBxY0FNUF
+# o7pBoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UEBhMC
+# VVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBU
+# cnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMQIQ
+# CoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzEL
+# BgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDUxNTAxMTg1OFowLwYJKoZI
+# hvcNAQkEMSIEIONMQp9oQl99Jc++TrsZU/r+a4TeiomhY3wi3VLo+/SKMA0GCSqG
+# SIb3DQEBAQUABIICAIEhkos97MH2PXUJHyWugp8GgBg93vJRSSpZe9mcYyycu5tZ
+# hk3uzMBt254N4/B1XAWI/vTs5MpRFuncISOZKOhZP7svmy/PF0N9p25dtDLWLOTz
+# HGNqoSLc22L6ddiAdtXRGiW513IcQsGmi3dJGpntjmogFUDukKoITTrcYK2hQJIK
+# /wTbBNvbVkI6YGvGDf1yuH8YPNH9FkEvW2u8H63CRRDYJVZYlmkoXHZq0TrWlziw
+# 1QgWa3QrxM/VpOfPwMd2IRzrZtz+Ks7oHns+l9Iyp2UEoM52fOTnv/BLZCQpKHWY
+# T1XCSaUcK8ePiFaIi/X2JwLOQTQT4Eskfe0T2oNXchAmg5v2gChj1hGOHKHBhIqQ
+# PTevNyMtUeduHGJMxA3JuXgEp2HcXyoAaIPF3iTqz8coD1PKsO61g0VwXgFeHi11
+# 5iMYdwpfsJU/RFNLN0699v3k3KxIc2VUBsyHCkWE6MUJ5ww3/wV807/3wdEJYpIL
+# w125VxdH781PWFCLon5rOxV1BRrvl7IDY03HHLA8JB+2X/VW4asBTauxni5tqkzt
+# uuyFsYNvBqJ0GQCWmqPbSrnFl003Mfm3gClBIzXkuGbG36ta5Vm/gS6DWKrohfHl
+# 7o8IfpsQtWIwmi1zTJFnigaL9H9QbCsBrlA1ocJxp2RqokHq3RjUeU3nI9z5
 # SIG # End signature block
