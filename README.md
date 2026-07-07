@@ -1,146 +1,97 @@
-# Install-NdesServer.ps1
+# Install-OcspServer.ps1
 
-Installs and configures the Network Device Enrollment Service (NDES) role on Windows Server to support the Microsoft Intune Certificate Connector.
+A PowerShell script to install and configure the Active Directory Certificate Services (ADCS) Online Responder role service on Windows Server. The Online Responder provides Online Certificate Status Protocol (OCSP) services, allowing clients to check certificate revocation status efficiently without downloading full Certificate Revocation Lists (CRLs).
 
 ## Overview
 
-This script automates the end-to-end installation and hardening of NDES, including role installation, IIS configuration, certificate binding, registry tuning, and optional post-installation tasks. It supports both standard domain service accounts and Group Managed Service Accounts (gMSA).
+This script automates the initial installation and security hardening of an OCSP server. Specifically, it performs the following tasks.
 
-> **Important:** This script is designed specifically for NDES deployments that support the Microsoft Intune Certificate Connector. The settings applied are not suitable for other NDES deployment scenarios.
+* Installs the ADCS Online Responder role service (`ADCS-Online-Cert`) with management tools
+* Configures the Online Responder service using `Install-AdcsOnlineResponder`
+* Enables Windows audit policy for **Certification Services**, **Registry**, and **Other System Events** (success and failure)
+* Enables OCSP service auditing by setting the `AuditFilter` registry value to `11` (0x0B), which captures service start/stop events, revocation configuration changes, and signing certificate events
+* Restarts the Online Responder service (`OcspSvc`) to apply the audit filter setting
+* Enables the built-in Windows firewall rules for the Online Responder service, restricted to the **Domain** profile
+* Launches the OCSP management console (`ocsp.msc`) to complete revocation configuration (on servers with the Desktop Experience)
+
+> \\\*\\\*Note:\\\*\\\* Registry and Other System Events success auditing only generates events for objects with SACLs defined, so the impact on security event log volume is minimal.
 
 ## Requirements
 
-- Windows Server with PowerShell 5.1 or later
-- Must be run as Administrator
-- A valid TLS certificate installed in the local machine certificate store
-- A domain service account or gMSA pre-configured for NDES
-- Network connectivity to the target Certification Authority (CA)
+* Windows Server with the ADCS Online Responder role service available
+* PowerShell running in an **elevated** session (the script enforces `#Requires -RunAsAdministrator`)
+* Domain-joined server (the firewall rules enabled by this script are scoped to the Domain profile)
 
-## Parameters
+## Installation
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `RaName` | Yes | Name of the NDES registration authority (RA) |
-| `CaConfig` | Yes | CA configuration string in the format `CA server FQDN\CA common name` (use `certutil.exe -dump` to find) |
-| `EnrollmentTemplate` | Yes | Template name (not display name) of the NDES certificate template. Alias: `Template` |
-| `Thumbprint` | Yes | Thumbprint of the TLS certificate to bind to the NDES service |
-| `ServiceAccount` | Yes | Service account for the NDES service. Use `domain\username` for a standard domain account (the script prompts for the password and validates it against the domain) or `domain\username$` with `-GroupManagedServiceAccount` for a gMSA |
-| `GroupManagedServiceAccount` | No | Configures the SCEP IIS application pool to use a gMSA |
-| `Fqdn` | No | Custom FQDN for the NDES service when deployed behind a load balancer |
-| `RemoveLegacyCertificates` | No | Removes any legacy RA certificates issued to the NDES server |
-| `RemoveDefaultTemplates` | No | Unpublishes the default NDES templates (CEPEncryption, EnrollmentAgentOffline, IPSECIntermediateOffline) from the CA |
-| `AutoEnrollment` | No | Creates a scheduled task to restart the SCEP application pool on certificate renewal events |
-| `Restart` | No | Restarts the server after installation completes |
-
-## What the Script Does
-
-1. Validates the service account and TLS certificate; for standard domain accounts, prompts for the password and verifies it against the domain before making any changes
-2. Grants the "Log on as a service" right to standard service accounts
-3. Installs the ADCS Device Enrollment role and required Windows features
-4. Backs up the IIS configuration before making changes (helpful in failure scenarios)
-5. Installs and tests the gMSA on the local computer (if applicable)
-6. Adds the service account to the local `IIS_IUSRS` group
-7. Configures NDES using `Install-AdcsNetworkDeviceEnrollmentService`
-8. Sets the enrollment certificate template for all MSCEP template types
-9. Enables IIS long URL support (registry and IIS request filtering)
-10. Removes the HTTP site binding (if present) and disables the IIS default document (attack surface reduction)
-11. Removes the NDES administration page IIS application (if present - attack surface reduction)
-12. Binds the TLS certificate to the Default Web Site
-13. Configures the SHA256 hash algorithm for certificate requests (default uses SHA1 which has been deprecated)
-14. Disables IE Enhanced Security Configuration (required for Intune Certificate Connector installation)
-15. Sets an SPN for the custom FQDN (if `-Fqdn` is specified - optional, only required for load-balanced deployments)
-16. Optionally creates a scheduled task for automatic SCEP application pool restart on certificate renewal (when certificate autoenrollment is configured)
-17. Optionally removes legacy RA certificates (cleanup)
-18. Optionally unpublishes default NDES certificate templates from the CA (attack surface reduction)
-
-A transcript log is written to `%ProgramData%\RMHCI\PowerShell\` for troubleshooting.
-
-## Examples
-
-**Standard service account with server restart:**
+This script is published to the [PowerShell Gallery](https://www.powershellgallery.com/packages/Install-OcspServer/). Run the following command in an elevated PowerShell window to install it.
 
 ```powershell
-.\Install-NdesServer.ps1 `
-    -RaName 'Contoso NDES RA' `
-    -CaConfig 'ca1.corp.contoso.com\Contoso Issuing CA' `
-    -Template 'IntuneSCEPEnrollment' `
-    -Thumbprint 'B9413E2A1B2F5BFA0AD8A16118198ACC256D0CF9' `
-    -ServiceAccount 'corp\svc_ndes' `
-    -Restart
+Install-Script Install-OcspServer
 ```
 
-**Group Managed Service Account (gMSA):**
+To update a previously installed version of the script, run the following command.
 
 ```powershell
-.\Install-NdesServer.ps1 `
-    -RaName 'Contoso NDES RA' `
-    -CaConfig 'ca1.corp.contoso.com\Contoso Issuing CA' `
-    -Template 'IntuneSCEPEnrollment' `
-    -Thumbprint 'B9413E2A1B2F5BFA0AD8A16118198ACC256D0CF9' `
-    -ServiceAccount 'corp\gmsa_ndes$' `
-    -GroupManagedServiceAccount
+Update-Script Install-OcspServer
 ```
 
-**gMSA with automatic certificate renewal support:**
+Alternatively, download the script directly from the [GitHub repository](https://github.com/richardhicks/ocsp).
+
+## Usage
+
+Install and configure the Online Responder on the local server.
 
 ```powershell
-.\Install-NdesServer.ps1 `
-    -RaName 'Contoso NDES RA' `
-    -CaConfig 'ca1.corp.contoso.com\Contoso Issuing CA' `
-    -Template 'IntuneSCEPEnrollment' `
-    -Thumbprint 'B9413E2A1B2F5BFA0AD8A16118198ACC256D0CF9' `
-    -ServiceAccount 'corp\gmsa_ndes$' `
-    -GroupManagedServiceAccount `
-    -AutoEnrollment
+.\\\\Install-OcspServer.ps1
 ```
 
-**Custom FQDN (load balancer scenario):**
+Preview all changes without applying them.
 
 ```powershell
-.\Install-NdesServer.ps1 `
-    -RaName 'Contoso NDES RA' `
-    -CaConfig 'ca1.corp.contoso.com\Contoso Issuing CA' `
-    -Template 'IntuneSCEPEnrollment' `
-    -Thumbprint 'B9413E2A1B2F5BFA0AD8A16118198ACC256D0CF9' `
-    -ServiceAccount 'corp\svc_ndes' `
-    -Fqdn 'ndes.corp.contoso.com'
+.\\\\Install-OcspServer.ps1 -WhatIf
 ```
 
-**Remove legacy RA certificates and default templates:**
+Display detailed progress information during execution.
 
 ```powershell
-.\Install-NdesServer.ps1 `
-    -RaName 'Contoso NDES RA' `
-    -CaConfig 'ca1.corp.contoso.com\Contoso Issuing CA' `
-    -Template 'IntuneSCEPEnrollment' `
-    -Thumbprint 'B9413E2A1B2F5BFA0AD8A16118198ACC256D0CF9' `
-    -ServiceAccount 'corp\svc_ndes' `
-    -RemoveLegacyCertificates `
-    -RemoveDefaultTemplates
+.\\\\Install-OcspServer.ps1 -Verbose
 ```
 
-## Notes
+## Post-Installation Configuration
 
-- For standard domain service accounts, the script prompts for the account password with a secure credential prompt and validates it against the domain before installation begins. No password is required for gMSA deployments.
-- The script is safe to run multiple times. IIS configuration steps completed on a previous run (such as removing the HTTP site binding or the NDES administration page) are skipped.
-- The script supports `-WhatIf` and `-Confirm`. A transcript is written even during `-WhatIf` runs.
-- A server restart is required after installation. Use `-Restart` to restart automatically, or restart manually after the script completes.
-- If the installation fails after IIS configuration has been modified, restore the IIS backup with: `& appcmd.exe restore backup <BackupName>`
-- To remove a failed NDES configuration and start over: `Uninstall-AdcsNetworkDeviceEnrollmentService -Force`
-- The NDES service account must have **Read** and **Enroll** permissions on the enrollment certificate template.
+This script installs and hardens the Online Responder service, but additional configuration is required before the server can respond to certificate status requests. Administrators must create a revocation configuration for each issuing Certification Authority (CA) using the Online Responder management console (`ocsp.msc`). This includes enrolling for an OCSP Response Signing certificate and specifying the CRL distribution points the responder will use.
 
-## Additional Resources
+* On servers with the Desktop Experience, the script automatically launches the OCSP management console after installation completes.
+* On **Server Core** installations, the script displays a warning. Open the OCSP management console on an administrative workstation with the Remote Server Administration Tools (RSAT) installed to complete the configuration remotely.
 
-- [Richard M. Hicks Consulting Blog](https://www.richardhicks.com/)
-- [NDES GitHub Repository](https://github.com/richardhicks/ndes/)
+In addition, the issuing CA must be configured to include the OCSP URL in the Authority Information Access (AIA) extension of issued certificates.
+
+## Restart Handling
+
+If installing the Online Responder role service requires a system restart, the script displays a warning and exits with code **3010** (the standard Windows convention for success with a restart required). Restart the server and run the script again to complete the configuration.
+
+## Exit Codes
+
+|Code|Meaning|
+|-|-|
+|0|Success|
+|1|An error occurred during installation or configuration|
+|3010|Success, but a system restart is required. Restart and run the script again.|
+
+## Support
+
+This script is provided as-is without warranty or formal support. However, feedback is welcome. Please open an [issue](https://github.com/richardhicks/ocsp/issues) on GitHub to report problems or suggest improvements.
 
 ## License
 
-Licensed under the MIT License. See [LICENSE](https://github.com/richardhicks/ndes/blob/main/LICENSE) for details.
+This project is licensed under the [MIT License](https://github.com/richardhicks/ocsp/blob/main/LICENSE).
 
 ## Author
 
-**Richard Hicks**  
-Richard M. Hicks Consulting, Inc.  
-[rich@richardhicks.com](mailto:rich@richardhicks.com)  
+**Richard Hicks**
+Richard M. Hicks Consulting, Inc.
 [https://www.richardhicks.com/](https://www.richardhicks.com/)
+
+
+
